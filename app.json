@@ -3,6 +3,7 @@
   "description": "A tool for automatically scraping TaurBull website content and uploading it to Elevenlabs Knowledge Base",
   "repository": "https://github.com/yourusername/taurbull_scraper",
   "keywords": ["python", "scraper", "elevenlabs", "knowledge-base"],
+  "success_url": "/",
   "env": {
     "ELEVENLABS_API_KEY": {
       "description": "Your Elevenlabs API key",
@@ -13,9 +14,21 @@
       "required": true
     }
   },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "addons": [
+    "scheduler:standard"
+  ],
   "buildpacks": [
     {
       "url": "heroku/python"
     }
-  ]
+  ],
+  "scripts": {
+    "postdeploy": "python heroku_scheduler.py --init"
+  }
 } 
