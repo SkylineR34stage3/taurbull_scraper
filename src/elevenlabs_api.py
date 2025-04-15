@@ -10,6 +10,7 @@ import time
 import logging
 import requests
 from typing import Dict, List, Any, Optional
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,9 @@ class ElevenlabsAPI:
         # Use environment variables as fallback if not provided
         self.api_key = api_key or os.environ.get("ELEVENLABS_API_KEY")
         self.assistant_id = assistant_id or os.environ.get("ELEVENLABS_ASSISTANT_ID")
+        
+        # Check for assistant type environment variable
+        self.assistant_type = os.environ.get("ELEVENLABS_ASSISTANT_TYPE", "").lower()
         
         if not self.api_key:
             logger.error("No API key provided and ELEVENLABS_API_KEY environment variable not set")
@@ -98,19 +102,38 @@ class ElevenlabsAPI:
             logger.error(f"Error verifying credentials: {e}")
             return False
             
-    def get_assistant_info(self) -> Dict[str, Any]:
+    def get_assistant_info(self, assistant_id: str = None) -> Dict[str, Any]:
         """
         Get information about the assistant
         
+        Args:
+            assistant_id: Optional assistant ID, falls back to self.assistant_id if not provided
+            
         Returns:
             Assistant information as a dictionary
         """
+        # Use provided assistant_id or fallback to instance variable
+        assistant_id = assistant_id or self.assistant_id
+        if not assistant_id:
+            logger.error("No assistant ID provided")
+            return {"error": "No assistant ID provided"}
+        
         # Try multiple endpoints to handle different assistant types
-        endpoints = [
-            f"/assistants/{self.assistant_id}",  # Standard assistants
-            f"/convai/agents/{self.assistant_id}",  # Regular assistants
-            f"/phone-assistants/{self.assistant_id}"  # Phone assistants
-        ]
+        endpoints = []
+        
+        # Prioritize endpoints based on assistant type if set
+        if self.assistant_type == "convai":
+            endpoints = [
+                f"/convai/agents/{assistant_id}",  # Check convai endpoints first
+                f"/assistants/{assistant_id}",
+                f"/phone-assistants/{assistant_id}"
+            ]
+        else:
+            endpoints = [
+                f"/assistants/{assistant_id}",  # Standard assistants
+                f"/convai/agents/{assistant_id}",  # Regular assistants
+                f"/phone-assistants/{assistant_id}"  # Phone assistants
+            ]
         
         for endpoint in endpoints:
             response = self._make_request("GET", endpoint)
@@ -134,13 +157,59 @@ class ElevenlabsAPI:
             logger.error(f"Error getting assistant info: {assistant_info['error']}")
             return None
             
-        # Look for knowledge base in assistant configuration
-        # Different assistant types have different field names for knowledge base IDs
-        knowledge_bases = assistant_info.get("knowledge_base_ids", [])
+        # Look for knowledge base IDs in various places in the assistant configuration
+        knowledge_bases = []
         
-        # Try alternative field names if standard field is empty
+        # For convai agents, check the prompt's knowledge_base field first if that's our type
+        if self.assistant_type == "convai":
+            try:
+                # Get knowledge base info from prompt (for convai agents)
+                prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
+                if prompt and "knowledge_base" in prompt:
+                    kb_list = prompt.get("knowledge_base", [])
+                    if kb_list and isinstance(kb_list, list) and len(kb_list) > 0:
+                        # Extract IDs from knowledge base items
+                        knowledge_bases = [kb.get("id") for kb in kb_list if kb.get("id")]
+                        if knowledge_bases:
+                            logger.info(f"Found knowledge base IDs in prompt section: {knowledge_bases}")
+                            return knowledge_bases[0]
+            except Exception as e:
+                logger.error(f"Error parsing knowledge base from conversation config: {e}")
+
+        # 1. Standard field for regular assistants
+        if not knowledge_bases:
+            knowledge_bases = assistant_info.get("knowledge_base_ids", [])
+        
+        # 2. Alternative field for some assistant types
         if not knowledge_bases:
             knowledge_bases = assistant_info.get("knowledge_base", {}).get("ids", [])
+        
+        # 3. Check in conversation_config > agent > prompt > knowledge_base (for convai agents)
+        if not knowledge_bases:
+            try:
+                # Navigate through the nested structure
+                prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
+                if prompt and "knowledge_base" in prompt:
+                    kb_list = prompt.get("knowledge_base", [])
+                    if kb_list and isinstance(kb_list, list) and len(kb_list) > 0:
+                        # Extract IDs from knowledge base items
+                        knowledge_bases = [kb.get("id") for kb in kb_list if kb.get("id")]
+                        logger.info(f"Found knowledge base IDs in prompt section: {knowledge_bases}")
+            except Exception as e:
+                logger.error(f"Error parsing knowledge base from conversation config: {e}")
+        
+        # 4. Check in prompt > items for knowledge_base type (for newer assistants)
+        if not knowledge_bases:
+            try:
+                prompt_items = assistant_info.get("prompt", {}).get("items", [])
+                for item in prompt_items:
+                    if item.get("type") == "knowledge_base":
+                        kb_id = item.get("knowledge_base_id")
+                        if kb_id:
+                            knowledge_bases.append(kb_id)
+                            logger.info(f"Found knowledge base ID in prompt items: {kb_id}")
+            except Exception as e:
+                logger.error(f"Error parsing knowledge base from prompt items: {e}")
         
         if not knowledge_bases:
             logger.error("No knowledge bases found for this assistant")
@@ -149,28 +218,84 @@ class ElevenlabsAPI:
         # Return the first knowledge base ID (most assistants only have one)
         return knowledge_bases[0]
         
-    def list_knowledge_base(self) -> Dict[str, Any]:
+    def list_knowledge_bases(self) -> List[Dict[str, Any]]:
         """
         List all knowledge bases
         
         Returns:
+            List of knowledge bases
+        """
+        # Try multiple endpoints
+        endpoints = []
+        
+        # Prioritize endpoints based on assistant type
+        if self.assistant_type == "convai":
+            endpoints = [
+                "/convai/knowledge-base",
+                "/knowledge-bases"
+            ]
+        else:
+            endpoints = [
+                "/knowledge-bases",
+                "/convai/knowledge-base"
+            ]
+        
+        for endpoint in endpoints:
+            response = self._make_request("GET", endpoint)
+            if "error" not in response:
+                # Handle different response formats
+                if "knowledge_bases" in response:
+                    return response.get("knowledge_bases", [])
+                elif isinstance(response, list):
+                    return response
+                else:
+                    return [response]  # Single knowledge base in response
+                
+        logger.error("Failed to list knowledge bases")
+        return []
+        
+    # Keep for backwards compatibility
+    def list_knowledge_base(self) -> Dict[str, Any]:
+        """
+        List all knowledge bases (legacy method)
+        
+        Returns:
             Dictionary with knowledge base info
         """
-        endpoint = "/convai/knowledge-base"
-        return self._make_request("GET", endpoint)
+        kbs = self.list_knowledge_bases()
+        if kbs:
+            return {"knowledge_bases": kbs}
+        return {"error": "Failed to list knowledge bases", "documents": []}
         
-    def get_assistant_knowledge_base(self) -> List[Dict[str, Any]]:
+    def get_assistant_kb_documents(self, assistant_id: str = None) -> List[Dict[str, Any]]:
         """
         Get the knowledge base documents associated with the assistant
         
+        Args:
+            assistant_id: Optional assistant ID, falls back to self.assistant_id if not provided
+            
         Returns:
             List of knowledge base documents
         """
-        # Try endpoints for different assistant types
+        # Use provided assistant_id or fallback to instance variable
+        assistant_id = assistant_id or self.assistant_id
+        if not assistant_id:
+            logger.error("No assistant ID provided")
+            return []
+            
+        # First try to get knowledge base ID
+        kb_id = self.get_knowledge_base_id()
+        if kb_id:
+            # If we have a KB ID, list its documents
+            documents = self.list_kb_documents(kb_id)
+            if documents:
+                return documents
+        
+        # If that fails, try endpoints for different assistant types
         endpoints = [
-            f"/assistants/{self.assistant_id}/knowledge-base",
-            f"/convai/agents/{self.assistant_id}/knowledge-base",
-            f"/phone-assistants/{self.assistant_id}/knowledge-base"
+            f"/assistants/{assistant_id}/knowledge-base",
+            f"/convai/agents/{assistant_id}/knowledge-base",
+            f"/phone-assistants/{assistant_id}/knowledge-base"
         ]
         
         for endpoint in endpoints:
@@ -178,10 +303,46 @@ class ElevenlabsAPI:
             if "error" not in response:
                 return response.get("documents", [])
         
+        # If all direct attempts fail, try to extract from assistant info
+        assistant_info = self.get_assistant_info(assistant_id)
+        if "error" not in assistant_info:
+            try:
+                # Get knowledge base info from prompt (for convai agents)
+                prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
+                if prompt and "knowledge_base" in prompt:
+                    kb_list = prompt.get("knowledge_base", [])
+                    if kb_list and isinstance(kb_list, list):
+                        # Return the knowledge base items directly
+                        return kb_list
+                
+                # Try newer assistant format with items array
+                prompt_items = assistant_info.get("prompt", {}).get("items", [])
+                kb_entries = [item for item in prompt_items if item.get("type") == "knowledge_base"]
+                if kb_entries:
+                    # Get knowledge base ID from the first KB entry
+                    for entry in kb_entries:
+                        if "knowledge_base_id" in entry:
+                            kb_id = entry["knowledge_base_id"]
+                            documents = self.list_kb_documents(kb_id)
+                            if documents:
+                                return documents
+            except Exception as e:
+                logger.error(f"Error extracting knowledge base from assistant info: {e}")
+        
         logger.error("Failed to get assistant knowledge base documents")
         return []
+    
+    # Keep for backwards compatibility
+    def get_assistant_knowledge_base(self) -> List[Dict[str, Any]]:
+        """
+        Get the knowledge base documents associated with the assistant (legacy method)
         
-    def list_documents(self, knowledge_base_id: str) -> List[Dict[str, Any]]:
+        Returns:
+            List of knowledge base documents
+        """
+        return self.get_assistant_kb_documents()
+        
+    def list_kb_documents(self, knowledge_base_id: str) -> List[Dict[str, Any]]:
         """
         List all documents in a knowledge base
         
@@ -195,10 +356,34 @@ class ElevenlabsAPI:
         response = self._make_request("GET", endpoint)
         
         if "error" in response:
-            logger.error(f"Error listing documents: {response['error']}")
+            # Try alternative endpoint format
+            endpoint = f"/convai/knowledge-base/{knowledge_base_id}/documents"
+            response = self._make_request("GET", endpoint)
+            
+            if "error" in response:
+                logger.error(f"Error listing documents: {response.get('error')}")
+                return []
+        
+        # Handle different response formats
+        if "documents" in response:
+            return response.get("documents", [])
+        elif isinstance(response, list):
+            return response
+        else:
             return []
             
-        return response.get("documents", [])
+    # Keep for backwards compatibility
+    def list_documents(self, knowledge_base_id: str) -> List[Dict[str, Any]]:
+        """
+        List all documents in a knowledge base (legacy method)
+        
+        Args:
+            knowledge_base_id: ID of the knowledge base
+            
+        Returns:
+            List of documents
+        """
+        return self.list_kb_documents(knowledge_base_id)
         
     def add_text_to_knowledge_base(self, text: str, name: str) -> Dict[str, Any]:
         """
@@ -211,28 +396,160 @@ class ElevenlabsAPI:
         Returns:
             Response containing the document ID
         """
-        # First get the knowledge base ID associated with the assistant
+        # First try with existing endpoint methods
         kb_id = self.get_knowledge_base_id()
-        if not kb_id:
-            logger.error("Could not find knowledge base ID")
-            return {"error": "Could not find knowledge base ID"}
+        
+        # If we have a knowledge base ID, try to use standard upload methods
+        if kb_id:
+            # Try different endpoint formats for uploading
+            endpoints = []
             
-        # Now add the document to the knowledge base
-        endpoint = f"/knowledge-bases/{kb_id}/upload-text"
-        
-        data = {
-            "name": name,
-            "text": text
-        }
-        
-        response = self._make_request("POST", endpoint, data)
-        
-        if "error" in response:
-            logger.error(f"Error adding text to knowledge base: {response['error']}")
-            return {"error": response['error']}
+            # Prioritize endpoints based on assistant type
+            if self.assistant_type == "convai":
+                endpoints = [
+                    f"/convai/knowledge-base/{kb_id}/upload-text",
+                    f"/knowledge-bases/{kb_id}/upload-text"
+                ]
+            else:
+                endpoints = [
+                    f"/knowledge-bases/{kb_id}/upload-text",
+                    f"/convai/knowledge-base/{kb_id}/upload-text"
+                ]
             
-        return response
+            data = {
+                "name": name,
+                "text": text
+            }
+            
+            for endpoint in endpoints:
+                response = self._make_request("POST", endpoint, data)
+                if "error" not in response:
+                    logger.info(f"Successfully added text to knowledge base using endpoint: {endpoint}")
+                    return response
+                else:
+                    logger.error(f"Failed to add text using endpoint {endpoint}: {response.get('error', 'Unknown error')}")
+        else:
+            logger.error("No knowledge base ID found, trying alternative methods")
         
+        # If standard methods failed, try to find existing documents
+        kb_response = self.list_knowledge_base()
+        if "error" not in kb_response:
+            # For convai API
+            documents = kb_response.get("documents", [])
+            if documents:
+                # Use document ID directly
+                document_id = self._update_existing_document(documents[0].get("id"), text, name)
+                if document_id:
+                    logger.info(f"Successfully updated existing document: {document_id}")
+                    return {"id": document_id}
+        
+        # For convai agents, try a direct upload to the convai knowledge base
+        if self.assistant_type == "convai":
+            try:
+                # Try direct upload to convai knowledge base
+                endpoint = "/convai/knowledge-base/upload-text"
+                data = {
+                    "name": name,
+                    "text": text
+                }
+                response = self._make_request("POST", endpoint, data)
+                if "error" not in response:
+                    doc_id = response.get("id")
+                    if doc_id:
+                        logger.info(f"Successfully created convai document with ID: {doc_id}")
+                        
+                        # Try to associate with the assistant
+                        if self.assistant_id:
+                            self._associate_convai_document(doc_id)
+                            
+                        return {"id": doc_id}
+            except Exception as e:
+                logger.error(f"Error with direct convai upload: {e}")
+        
+        # As a last resort, try to update the document directly in the assistant prompt
+        try:
+            # Get the assistant info to find the document in the prompt section
+            assistant_info = self.get_assistant_info()
+            if "error" not in assistant_info:
+                # Navigate to the knowledge base in the prompt
+                prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
+                kb_list = prompt.get("knowledge_base", [])
+                
+                if kb_list and isinstance(kb_list, list) and len(kb_list) > 0:
+                    # Get the first document
+                    doc = kb_list[0]
+                    doc_id = doc.get("id")
+                    
+                    if doc_id:
+                        # Try updating via convai knowledge base document endpoint
+                        update_endpoint = f"/convai/knowledge-base/documents/{doc_id}"
+                        update_data = {
+                            "name": name,
+                            "text": text
+                        }
+                        
+                        update_response = self._make_request("PATCH", update_endpoint, update_data)
+                        if "error" not in update_response:
+                            logger.info(f"Successfully updated document in assistant prompt: {doc_id}")
+                            return {"id": doc_id}
+                            
+                        # If direct document update failed, try creating a new document
+                        create_endpoint = "/convai/knowledge-base/upload-text"
+                        create_data = {
+                            "name": name,
+                            "text": text
+                        }
+                        
+                        create_response = self._make_request("POST", create_endpoint, create_data)
+                        if "error" not in create_response:
+                            new_doc_id = create_response.get("id")
+                            if new_doc_id:
+                                # Now try to update the assistant configuration to use the new document
+                                self._update_assistant_knowledge_base(new_doc_id, doc_id)
+                                return {"id": new_doc_id}
+        except Exception as e:
+            logger.error(f"Error updating document in assistant prompt: {e}")
+        
+        # If all methods have failed, log the error
+        logger.error("Failed to add text to knowledge base using any available method")
+        return {"error": "Failed to add text to knowledge base"}
+        
+    def _update_existing_document(self, document_id: str, text: str, name: str) -> Optional[str]:
+        """
+        Update an existing document instead of creating a new one
+        
+        Args:
+            document_id: ID of the document to update
+            text: New text content
+            name: New name
+            
+        Returns:
+            Document ID if successful, None otherwise
+        """
+        try:
+            # Get current KB ID 
+            kb_response = self.list_knowledge_base()
+            if "error" in kb_response:
+                return None
+                
+            # Try the update endpoint
+            endpoint = f"/convai/knowledge-base/documents/{document_id}"
+            data = {
+                "name": name,
+                "text": text
+            }
+            
+            response = self._make_request("PATCH", endpoint, data)
+            if "error" not in response:
+                logger.info(f"Successfully updated existing document: {document_id}")
+                return document_id
+                
+            logger.error(f"Failed to update document: {response.get('error')}")
+            return None
+        except Exception as e:
+            logger.error(f"Error updating document: {e}")
+            return None
+            
     def delete_knowledge_base_document(self, document_id: str) -> bool:
         """
         Delete a document from a knowledge base
@@ -243,18 +560,210 @@ class ElevenlabsAPI:
         Returns:
             True if successful, False otherwise
         """
-        # First get the knowledge base ID associated with the assistant
-        kb_id = self.get_knowledge_base_id()
-        if not kb_id:
-            logger.error("Could not find knowledge base ID")
-            return False
-            
-        # Now delete the document
-        endpoint = f"/knowledge-bases/{kb_id}/documents/{document_id}"
-        response = self._make_request("DELETE", endpoint)
+        # Try different endpoint formats
+        endpoints = [
+            f"/knowledge-bases/{self.get_knowledge_base_id()}/documents/{document_id}",
+            f"/convai/knowledge-base/documents/{document_id}"
+        ]
         
-        if "error" in response:
-            logger.error(f"Error deleting document: {response['error']}")
+        for endpoint in endpoints:
+            response = self._make_request("DELETE", endpoint)
+            if "error" not in response:
+                return True
+            
+        logger.error(f"Error deleting document: {response.get('error')}")
+        return False
+        
+    def _update_assistant_knowledge_base(self, new_doc_id: str, old_doc_id: str = None) -> bool:
+        """
+        Update the assistant's knowledge base configuration
+        
+        Args:
+            new_doc_id: New document ID to use
+            old_doc_id: Old document ID to replace (if applicable)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get the assistant info
+            assistant_info = self.get_assistant_info()
+            if "error" in assistant_info:
+                return False
+                
+            # Check if we're dealing with a convai agent
+            if "conversation_config" in assistant_info:
+                # Build the update data
+                update_data = {
+                    "conversation_config": {
+                        "agent": {
+                            "prompt": {
+                                "knowledge_base": [
+                                    {
+                                        "type": "text",
+                                        "name": f"TaurBull FAQ - {datetime.now().strftime('%Y-%m-%d')}",
+                                        "id": new_doc_id,
+                                        "usage_mode": "auto"
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+                
+                # Send the update
+                update_endpoint = f"/convai/agents/{self.assistant_id}"
+                response = self._make_request("PATCH", update_endpoint, update_data)
+                
+                if "error" not in response:
+                    logger.info(f"Successfully updated assistant knowledge base to use document: {new_doc_id}")
+                    return True
+                    
+                logger.error(f"Failed to update assistant knowledge base: {response.get('error')}")
+                return False
+                
+            # For standard assistants
+            elif "knowledge_base_ids" in assistant_info:
+                # Get current IDs
+                kb_ids = assistant_info.get("knowledge_base_ids", [])
+                
+                # Replace old ID with new one if it exists
+                if old_doc_id and old_doc_id in kb_ids:
+                    kb_ids = [new_doc_id if id == old_doc_id else id for id in kb_ids]
+                else:
+                    kb_ids.append(new_doc_id)
+                
+                # Build update data
+                update_data = {
+                    "knowledge_base_ids": kb_ids
+                }
+                
+                # Send the update
+                update_endpoint = f"/assistants/{self.assistant_id}"
+                response = self._make_request("PATCH", update_endpoint, update_data)
+                
+                if "error" not in response:
+                    logger.info(f"Successfully updated assistant knowledge base IDs: {kb_ids}")
+                    return True
+                
+                logger.error(f"Failed to update assistant knowledge base IDs: {response.get('error')}")
+                return False
+                
+            logger.error("Unsupported assistant type for updating knowledge base")
             return False
             
-        return True 
+        except Exception as e:
+            logger.error(f"Error updating assistant knowledge base: {e}")
+            return False
+            
+    def _associate_convai_document(self, document_id: str) -> bool:
+        """
+        Associate a document with a convai agent
+        
+        Args:
+            document_id: ID of the document to associate
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.assistant_id:
+            logger.error("No assistant ID provided for association")
+            return False
+            
+        try:
+            # Get the assistant info
+            assistant_info = self.get_assistant_info()
+            if "error" in assistant_info:
+                logger.error(f"Failed to get assistant info: {assistant_info.get('error')}")
+                return False
+                
+            # Check if this is a convai agent
+            if "conversation_config" in assistant_info:
+                # Build the update data - careful not to overwrite existing fields
+                prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
+                kb_list = prompt.get("knowledge_base", [])
+                
+                # Prepare new knowledge base list with the new document added
+                new_kb_list = [
+                    {
+                        "type": "text",
+                        "name": f"TaurBull FAQ - {datetime.now().strftime('%Y-%m-%d')}",
+                        "id": document_id,
+                        "usage_mode": "auto"
+                    }
+                ]
+                
+                # Keep existing documents except if they have the same name pattern
+                for kb in kb_list:
+                    if kb.get("id") != document_id and not kb.get("name", "").startswith("TaurBull FAQ"):
+                        new_kb_list.append(kb)
+                
+                # Build the update data
+                update_data = {
+                    "conversation_config": {
+                        "agent": {
+                            "prompt": {
+                                "knowledge_base": new_kb_list
+                            }
+                        }
+                    }
+                }
+                
+                # Send the update
+                update_endpoint = f"/convai/agents/{self.assistant_id}"
+                response = self._make_request("PATCH", update_endpoint, update_data)
+                
+                if "error" not in response:
+                    logger.info(f"Successfully associated document {document_id} with assistant {self.assistant_id}")
+                    return True
+                else:
+                    logger.error(f"Failed to associate document: {response.get('error')}")
+                    
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error associating document with assistant: {e}")
+            return False
+
+    def associate_document_with_assistant(self, document_id: str, assistant_id: str = None) -> Dict[str, Any]:
+        """
+        Associate a document with an assistant
+        
+        Args:
+            document_id: ID of the document to associate
+            assistant_id: Optional assistant ID, falls back to self.assistant_id if not provided
+            
+        Returns:
+            Response from the API
+        """
+        assistant_id = assistant_id or self.assistant_id
+        if not assistant_id:
+            logger.error("No assistant ID provided")
+            return {"error": "No assistant ID provided"}
+            
+        # For convai agents, use the special method
+        if self.assistant_type == "convai":
+            if self._associate_convai_document(document_id):
+                return {"success": True}
+            else:
+                return {"error": "Failed to associate document with convai agent"}
+                
+        # Try different endpoints based on assistant type
+        endpoints = []
+        
+        if self.assistant_type == "phone":
+            endpoints.append(f"/phone-assistants/{assistant_id}/knowledge-base/documents/{document_id}")
+        else:
+            endpoints.extend([
+                f"/assistants/{assistant_id}/knowledge-base/documents/{document_id}",
+                f"/convai/agents/{assistant_id}/knowledge-base/documents/{document_id}"
+            ])
+            
+        for endpoint in endpoints:
+            response = self._make_request("POST", endpoint, {})
+            if "error" not in response:
+                logger.info(f"Successfully associated document {document_id} with assistant {assistant_id}")
+                return response
+        
+        logger.error(f"Failed to associate document with assistant using standard endpoints")
+        return {"error": "Failed to associate document with assistant"} 
