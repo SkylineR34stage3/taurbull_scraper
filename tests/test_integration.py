@@ -14,8 +14,15 @@ import sys
 from dotenv import load_dotenv
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from src.elevenlabs_api import ElevenlabsAPI
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, parent_dir)
+
+try:
+    from src.elevenlabs_api import ElevenlabsAPI
+except ImportError as e:
+    logging.error(f"Error importing ElevenlabsAPI: {e}")
+    logging.error(f"Python path: {sys.path}")
+    raise
 
 # Set up logging
 logging.basicConfig(

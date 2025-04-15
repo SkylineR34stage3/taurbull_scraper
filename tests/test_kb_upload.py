@@ -4,10 +4,22 @@ Simple test script to upload a document to the knowledge base and associate it w
 
 import os
 import sys
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("test_kb_upload")
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from src.elevenlabs_api import ElevenlabsAPI
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, parent_dir)
+
+try:
+    from src.elevenlabs_api import ElevenlabsAPI
+except ImportError as e:
+    logger.error(f"Error importing ElevenlabsAPI: {e}")
+    logger.error(f"Python path: {sys.path}")
+    raise
 
 def create_and_associate_test_document():
     """Create a test document and associate it with the assistant."""
