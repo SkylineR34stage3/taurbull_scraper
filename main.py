@@ -42,11 +42,6 @@ def setup_environment():
         logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         logger.error("Please set these variables in a .env file or export them in your shell")
         sys.exit(1)
-    
-    return {
-        "api_key": os.environ.get("ELEVENLABS_API_KEY"),
-        "assistant_id": os.environ.get("ELEVENLABS_ASSISTANT_ID")
-    }
 
 def main():
     """Main function to run the TaurBull scraper and update the knowledge base"""
@@ -60,13 +55,10 @@ def main():
     
     # Set up environment
     logger.info("Setting up environment")
-    env = setup_environment()
+    setup_environment()
     
     # Initialize the knowledge base manager
-    manager = KnowledgeBaseManager(
-        api_key=env["api_key"],
-        assistant_id=env["assistant_id"]
-    )
+    manager = KnowledgeBaseManager()
     
     # Display initial status
     if not args.dry_run:
