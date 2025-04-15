@@ -145,58 +145,56 @@ class ElevenlabsAPI:
             
         return response.get("documents", [])
         
-    def add_text_to_knowledge_base(self, kb_id: str, document_name: str, text_content: str) -> Optional[str]:
+    def add_text_to_knowledge_base(self, text: str, name: str) -> Dict[str, Any]:
         """
         Add text content to a knowledge base
         
         Args:
-            kb_id: Knowledge base ID
-            document_name: Name for the document
-            text_content: Text content to add
+            text: Text content to add
+            name: Name for the document
             
         Returns:
-            Document ID if successful, None otherwise
+            Response containing the document ID
         """
-        # First check if a similarly named document already exists
-        existing_docs = self.list_documents(kb_id)
-        existing_doc_names = [doc.get("name") for doc in existing_docs]
-        
-        # If document with same name exists, consider updating instead of creating
-        similar_docs = [doc for doc in existing_docs if doc.get("name", "").startswith(document_name)]
-        
-        # If similar document exists, delete it first
-        if similar_docs:
-            logger.info(f"Found existing document '{similar_docs[0].get('name')}'. Deleting before upload.")
-            self._delete_document(kb_id, similar_docs[0].get("id"))
-        
-        # Now add the new document
+        # First get the knowledge base ID associated with the assistant
+        kb_id = self.get_knowledge_base_id()
+        if not kb_id:
+            logger.error("Could not find knowledge base ID")
+            return {"error": "Could not find knowledge base ID"}
+            
+        # Now add the document to the knowledge base
         endpoint = f"/knowledge-bases/{kb_id}/upload-text"
         
         data = {
-            "name": document_name,
-            "text": text_content
+            "name": name,
+            "text": text
         }
         
         response = self._make_request("POST", endpoint, data)
         
         if "error" in response:
             logger.error(f"Error adding text to knowledge base: {response['error']}")
-            return None
+            return {"error": response['error']}
             
-        # Return the document ID
-        return response.get("document_id")
+        return response
         
-    def _delete_document(self, kb_id: str, document_id: str) -> bool:
+    def delete_knowledge_base_document(self, document_id: str) -> bool:
         """
         Delete a document from a knowledge base
         
         Args:
-            kb_id: Knowledge base ID
             document_id: Document ID to delete
             
         Returns:
             True if successful, False otherwise
         """
+        # First get the knowledge base ID associated with the assistant
+        kb_id = self.get_knowledge_base_id()
+        if not kb_id:
+            logger.error("Could not find knowledge base ID")
+            return False
+            
+        # Now delete the document
         endpoint = f"/knowledge-bases/{kb_id}/documents/{document_id}"
         response = self._make_request("DELETE", endpoint)
         

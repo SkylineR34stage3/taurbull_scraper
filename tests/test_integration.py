@@ -10,8 +10,12 @@ import json
 import logging
 import argparse
 import requests
+import sys
 from dotenv import load_dotenv
-from elevenlabs_api import ElevenlabsAPI
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from src.elevenlabs_api import ElevenlabsAPI
 
 # Set up logging
 logging.basicConfig(

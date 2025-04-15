@@ -3,7 +3,11 @@ Simple test script to upload a document to the knowledge base and associate it w
 """
 
 import os
-from elevenlabs_api import ElevenlabsAPI
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from src.elevenlabs_api import ElevenlabsAPI
 
 def create_and_associate_test_document():
     """Create a test document and associate it with the assistant."""
