@@ -19,7 +19,7 @@ class ElevenlabsAPI:
     """
     BASE_URL = "https://api.elevenlabs.io/v1"
     
-    def __init__(self, api_key: str, assistant_id: str):
+    def __init__(self, api_key: str = None, assistant_id: str = None):
         """
         Initialize the Elevenlabs API client
         
@@ -27,12 +27,17 @@ class ElevenlabsAPI:
             api_key: The Elevenlabs API key
             assistant_id: The ID of the assistant to update the knowledge base for
         """
-        self.api_key = api_key
-        self.assistant_id = assistant_id
+        # Use environment variables as fallback if not provided
+        self.api_key = api_key or os.environ.get("ELEVENLABS_API_KEY")
+        self.assistant_id = assistant_id or os.environ.get("ELEVENLABS_ASSISTANT_ID")
+        
+        if not self.api_key:
+            logger.error("No API key provided and ELEVENLABS_API_KEY environment variable not set")
+            
         self.headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "xi-api-key": api_key
+            "xi-api-key": self.api_key
         }
         
     def _make_request(self, method: str, endpoint: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -100,8 +105,21 @@ class ElevenlabsAPI:
         Returns:
             Assistant information as a dictionary
         """
-        endpoint = f"/assistants/{self.assistant_id}"
-        return self._make_request("GET", endpoint)
+        # Try multiple endpoints to handle different assistant types
+        endpoints = [
+            f"/assistants/{self.assistant_id}",  # Standard assistants
+            f"/convai/agents/{self.assistant_id}",  # Regular assistants
+            f"/phone-assistants/{self.assistant_id}"  # Phone assistants
+        ]
+        
+        for endpoint in endpoints:
+            response = self._make_request("GET", endpoint)
+            if "error" not in response:
+                return response
+            
+        # If all endpoints failed, return the last error
+        logger.error(f"Error getting assistant info: {response}")
+        return response
         
     def get_knowledge_base_id(self) -> Optional[str]:
         """
@@ -117,7 +135,12 @@ class ElevenlabsAPI:
             return None
             
         # Look for knowledge base in assistant configuration
+        # Different assistant types have different field names for knowledge base IDs
         knowledge_bases = assistant_info.get("knowledge_base_ids", [])
+        
+        # Try alternative field names if standard field is empty
+        if not knowledge_bases:
+            knowledge_bases = assistant_info.get("knowledge_base", {}).get("ids", [])
         
         if not knowledge_bases:
             logger.error("No knowledge bases found for this assistant")
@@ -125,6 +148,38 @@ class ElevenlabsAPI:
             
         # Return the first knowledge base ID (most assistants only have one)
         return knowledge_bases[0]
+        
+    def list_knowledge_base(self) -> Dict[str, Any]:
+        """
+        List all knowledge bases
+        
+        Returns:
+            Dictionary with knowledge base info
+        """
+        endpoint = "/convai/knowledge-base"
+        return self._make_request("GET", endpoint)
+        
+    def get_assistant_knowledge_base(self) -> List[Dict[str, Any]]:
+        """
+        Get the knowledge base documents associated with the assistant
+        
+        Returns:
+            List of knowledge base documents
+        """
+        # Try endpoints for different assistant types
+        endpoints = [
+            f"/assistants/{self.assistant_id}/knowledge-base",
+            f"/convai/agents/{self.assistant_id}/knowledge-base",
+            f"/phone-assistants/{self.assistant_id}/knowledge-base"
+        ]
+        
+        for endpoint in endpoints:
+            response = self._make_request("GET", endpoint)
+            if "error" not in response:
+                return response.get("documents", [])
+        
+        logger.error("Failed to get assistant knowledge base documents")
+        return []
         
     def list_documents(self, knowledge_base_id: str) -> List[Dict[str, Any]]:
         """
