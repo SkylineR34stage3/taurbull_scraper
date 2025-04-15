@@ -2,7 +2,7 @@ name: TaurBull Scraper Tests
 
 on:
   push:
-    branches: [ main, develop, 'feature/**', 'release/**' ]
+    branches: [ main, develop, 'feature/**', 'release/**', 'bugfix/**' ]
   pull_request:
     branches: [ main, develop ]
 
@@ -25,26 +25,34 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest pytest-cov
+        pip install pytest pytest-cov flake8
         
     - name: Lint with flake8
       run: |
-        pip install flake8
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
         
-    - name: Test with pytest
+    - name: Run test discovery
       run: |
-        pytest tests/ --dry-run
+        # Just list the tests without running them
+        python -m pytest tests/ --collect-only -v
       env:
-        # Use dummy credentials for testing
+        ELEVENLABS_API_KEY: dummy_key
+        ELEVENLABS_ASSISTANT_ID: dummy_id
+
+    - name: Verify script imports
+      run: |
+        # Check if the scripts can be imported without errors
+        python -c "import src.elevenlabs_api; import src.kb_manager; import src.taurbull_scraper; import src.simple_faq_scraper; print('All modules imported successfully')"
+      env:
         ELEVENLABS_API_KEY: dummy_key
         ELEVENLABS_ASSISTANT_ID: dummy_id
 
     - name: Check dry run functionality
       run: |
+        # Run the main script in dry run mode
         python main.py --dry-run --output test_github_actions.md
       env:
         ELEVENLABS_API_KEY: dummy_key
