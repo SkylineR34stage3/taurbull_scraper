@@ -6,6 +6,7 @@ Test script for uploading content to Elevenlabs convai agent knowledge base
 import os
 import logging
 import sys
+import pytest
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +23,7 @@ except ImportError as e:
     logger.error(f"Python path: {sys.path}")
     raise
 
+@pytest.mark.skip(reason="Requires actual Elevenlabs API credentials")
 def test_convai_upload():
     """Test uploading content to a convai agent knowledge base."""
     
@@ -57,11 +59,8 @@ def test_convai_upload():
     
     # Check the response
     document_id = response.get('id')
-    if document_id:
-        logger.info(f"✅ Upload successful. Document ID: {document_id}")
-    else:
-        logger.error(f"❌ Upload failed: {response}")
-        return False
+    assert document_id, f"Upload failed: {response}"
+    logger.info(f"✅ Upload successful. Document ID: {document_id}")
     
     # Get knowledge base documents
     logger.info("Checking knowledge base documents...")
@@ -71,7 +70,7 @@ def test_convai_upload():
     for i, doc in enumerate(documents, 1):
         logger.info(f"  {i}. {doc.get('name', 'Unknown')} (ID: {doc.get('id', 'Unknown')})")
     
-    return True
+    assert len(documents) > 0, "No documents found associated with the assistant"
 
 if __name__ == "__main__":
     success = test_convai_upload()

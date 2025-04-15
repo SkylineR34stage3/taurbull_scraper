@@ -11,6 +11,7 @@ import logging
 import argparse
 import requests
 import sys
+import pytest
 from dotenv import load_dotenv
 
 # Add parent directory to path for imports
@@ -34,15 +35,22 @@ logger = logging.getLogger("test_integration")
 # Load environment variables
 load_dotenv()
 
-def test_api_connection():
-    """Test the connection to the Elevenlabs API."""
+@pytest.fixture
+def api():
+    """Create an API connection fixture for tests."""
     try:
-        api = ElevenlabsAPI()
+        api_instance = ElevenlabsAPI()
         logger.info("✅ API Connection: Successfully connected to Elevenlabs API")
-        return api
+        return api_instance
     except Exception as e:
         logger.error(f"❌ API Connection: Failed to connect to Elevenlabs API - {str(e)}")
         return None
+
+def test_api_connection():
+    """Test the connection to the Elevenlabs API."""
+    api_instance = ElevenlabsAPI()
+    assert api_instance is not None, "Failed to create API connection"
+    logger.info("✅ API Connection: Successfully connected to Elevenlabs API")
 
 def test_knowledge_base_access(api):
     """Test access to the knowledge base."""
