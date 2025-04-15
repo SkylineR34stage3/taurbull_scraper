@@ -396,6 +396,11 @@ class ElevenlabsAPI:
         Returns:
             Response containing the document ID
         """
+        # For convai agents, try to directly update the document in the agent's prompt
+        if self.assistant_type == "convai":
+            return self._update_convai_agent_document(text, name)
+        
+        # Continue with normal knowledge base upload for other assistant types
         # First try with existing endpoint methods
         kb_id = self.get_knowledge_base_id()
         
@@ -404,17 +409,10 @@ class ElevenlabsAPI:
             # Try different endpoint formats for uploading
             endpoints = []
             
-            # Prioritize endpoints based on assistant type
-            if self.assistant_type == "convai":
-                endpoints = [
-                    f"/convai/knowledge-base/{kb_id}/upload-text",
-                    f"/knowledge-bases/{kb_id}/upload-text"
-                ]
-            else:
-                endpoints = [
-                    f"/knowledge-bases/{kb_id}/upload-text",
-                    f"/convai/knowledge-base/{kb_id}/upload-text"
-                ]
+            endpoints = [
+                f"/knowledge-bases/{kb_id}/upload-text",
+                f"/convai/knowledge-base/{kb_id}/upload-text"
+            ]
             
             data = {
                 "name": name,
@@ -443,76 +441,118 @@ class ElevenlabsAPI:
                     logger.info(f"Successfully updated existing document: {document_id}")
                     return {"id": document_id}
         
-        # For convai agents, try a direct upload to the convai knowledge base
-        if self.assistant_type == "convai":
-            try:
-                # Try direct upload to convai knowledge base
-                endpoint = "/convai/knowledge-base/upload-text"
-                data = {
-                    "name": name,
-                    "text": text
-                }
-                response = self._make_request("POST", endpoint, data)
-                if "error" not in response:
-                    doc_id = response.get("id")
-                    if doc_id:
-                        logger.info(f"Successfully created convai document with ID: {doc_id}")
-                        
-                        # Try to associate with the assistant
-                        if self.assistant_id:
-                            self._associate_convai_document(doc_id)
-                            
-                        return {"id": doc_id}
-            except Exception as e:
-                logger.error(f"Error with direct convai upload: {e}")
-        
-        # As a last resort, try to update the document directly in the assistant prompt
+        # Try a direct upload to a knowledge base (without specifying a KB ID)
         try:
-            # Get the assistant info to find the document in the prompt section
-            assistant_info = self.get_assistant_info()
-            if "error" not in assistant_info:
-                # Navigate to the knowledge base in the prompt
-                prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
-                kb_list = prompt.get("knowledge_base", [])
-                
-                if kb_list and isinstance(kb_list, list) and len(kb_list) > 0:
-                    # Get the first document
-                    doc = kb_list[0]
-                    doc_id = doc.get("id")
+            endpoint = "/convai/knowledge-base/upload-text"
+            data = {
+                "name": name,
+                "text": text
+            }
+            response = self._make_request("POST", endpoint, data)
+            if "error" not in response:
+                doc_id = response.get("id")
+                if doc_id:
+                    logger.info(f"Successfully created document with ID: {doc_id}")
                     
-                    if doc_id:
-                        # Try updating via convai knowledge base document endpoint
-                        update_endpoint = f"/convai/knowledge-base/documents/{doc_id}"
-                        update_data = {
-                            "name": name,
-                            "text": text
-                        }
+                    # Try to associate with the assistant
+                    if self.assistant_id:
+                        self._associate_convai_document(doc_id)
                         
-                        update_response = self._make_request("PATCH", update_endpoint, update_data)
-                        if "error" not in update_response:
-                            logger.info(f"Successfully updated document in assistant prompt: {doc_id}")
-                            return {"id": doc_id}
-                            
-                        # If direct document update failed, try creating a new document
-                        create_endpoint = "/convai/knowledge-base/upload-text"
-                        create_data = {
-                            "name": name,
-                            "text": text
-                        }
-                        
-                        create_response = self._make_request("POST", create_endpoint, create_data)
-                        if "error" not in create_response:
-                            new_doc_id = create_response.get("id")
-                            if new_doc_id:
-                                # Now try to update the assistant configuration to use the new document
-                                self._update_assistant_knowledge_base(new_doc_id, doc_id)
-                                return {"id": new_doc_id}
+                    return {"id": doc_id}
         except Exception as e:
-            logger.error(f"Error updating document in assistant prompt: {e}")
+            logger.error(f"Error with direct upload: {e}")
         
         # If all methods have failed, log the error
         logger.error("Failed to add text to knowledge base using any available method")
         return {"error": "Failed to add text to knowledge base"}
+        
+    def _update_convai_agent_document(self, text: str, name: str) -> Dict[str, Any]:
+        """
+        Update document content directly in a convai agent by updating the agent configuration.
+        This is a direct approach that bypasses knowledge base endpoints.
+        
+        Args:
+            text: Document text content
+            name: Document name
+            
+        Returns:
+            Dictionary with document ID if successful
+        """
+        logger.info("Attempting to directly update convai agent document")
+        try:
+            # Get the assistant info first
+            assistant_info = self.get_assistant_info()
+            if "error" in assistant_info:
+                logger.error(f"Failed to get assistant info: {assistant_info}")
+                return {"error": "Failed to get assistant info"}
+            
+            # Get the knowledge base entries from the prompt
+            prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
+            kb_list = prompt.get("knowledge_base", [])
+            
+            # If there's an existing document, get its ID
+            document_id = None
+            for kb in kb_list:
+                if kb.get("type") == "text":
+                    document_id = kb.get("id")
+                    logger.info(f"Found existing document ID: {document_id}")
+                    break
+            
+            # If no document found, generate a placeholder ID 
+            if not document_id:
+                # Use a timestamp-based ID if none exists
+                import uuid
+                document_id = f"placeholder_{str(uuid.uuid4())[:8]}"
+                logger.info(f"Created placeholder document ID: {document_id}")
+            
+            # Create updated knowledge base entry
+            new_kb_entry = {
+                "type": "text",
+                "name": name,
+                "id": document_id,
+                "usage_mode": "auto"
+            }
+            
+            # Create a new knowledge base list with our updated document
+            new_kb_list = [new_kb_entry]
+            
+            # Keep other non-TaurBull entries
+            for kb in kb_list:
+                if kb.get("id") != document_id and not kb.get("name", "").startswith("TaurBull"):
+                    new_kb_list.append(kb)
+            
+            # Create the update data
+            update_data = {
+                "conversation_config": {
+                    "agent": {
+                        "prompt": {
+                            "knowledge_base": new_kb_list,
+                            "rag": {
+                                "enabled": True
+                            }
+                        }
+                    }
+                },
+                "knowledge_base_text": {
+                    document_id: text
+                }
+            }
+            
+            # Send the update
+            logger.info(f"Updating agent with new document content (ID: {document_id})")
+            update_endpoint = f"/convai/agents/{self.assistant_id}"
+            response = self._make_request("PATCH", update_endpoint, update_data)
+            
+            if "error" not in response:
+                logger.info(f"Successfully updated convai agent document content")
+                return {"id": document_id}
+            else:
+                logger.error(f"Failed to update agent: {response}")
+                return {"error": f"Failed to update agent: {response}"}
+                
+        except Exception as e:
+            logger.error(f"Error updating convai agent document: {e}")
+            return {"error": f"Error updating convai agent document: {e}"}
         
     def _update_existing_document(self, document_id: str, text: str, name: str) -> Optional[str]:
         """
