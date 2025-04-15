@@ -367,7 +367,8 @@ class TaurBullScraper:
         # Join all parts
         formatted_content = "\n".join(content_parts)
         
-        # Create document title with timestamp
-        document_title = f"TaurBull FAQ Content - {time.strftime('%Y-%m-%d')}"
+        # Create document title with timestamp and document type
+        # Use underscore naming convention for better type detection
+        document_title = f"TaurBull_FAQ - {time.strftime('%Y-%m-%d')}"
         
         return formatted_content, document_title 

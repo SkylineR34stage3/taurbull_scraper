@@ -231,9 +231,11 @@ class KnowledgeBaseManager:
             
             # Step 5: Add the new content to the knowledge base
             logger.info("Adding new FAQ content to knowledge base...")
+            # Use consistent naming with "FAQ" keyword
+            document_name = f"TaurBull_FAQ - {datetime.now().strftime('%Y-%m-%d')}"
             response = self.api.add_text_to_knowledge_base(
                 text=formatted_faqs,
-                name=f"TaurBull FAQ - {datetime.now().strftime('%Y-%m-%d')}"
+                name=document_name
             )
             
             # Step 6: Update the content map and document map
