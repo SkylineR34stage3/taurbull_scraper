@@ -490,12 +490,26 @@ class ElevenlabsAPI:
             prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
             kb_list = prompt.get("knowledge_base", [])
             
-            # If there's an existing document, get its ID
+            # Extract document type from name (e.g., "TaurBull_FAQ", "TaurBull_Products")
+            # This allows for different document types to be managed separately
+            doc_type = None
+            if "_" in name:
+                doc_type = name.split("_")[1].split(" ")[0].lower()  # Extract type (FAQ, Products, etc.)
+            
+            # If there's an existing document with the same type, use its ID
             document_id = None
             for kb in kb_list:
-                if kb.get("type") == "text":
+                kb_name = kb.get("name", "")
+                
+                # Check if this is the same type of document
+                if doc_type and "_" in kb_name and doc_type.lower() in kb_name.lower():
                     document_id = kb.get("id")
-                    logger.info(f"Found existing document ID: {document_id}")
+                    logger.info(f"Found existing document ID for {doc_type}: {document_id}")
+                    break
+                # Fallback to exact name match
+                elif kb_name == name:
+                    document_id = kb.get("id")
+                    logger.info(f"Found existing document ID with exact name match: {document_id}")
                     break
             
             # If no document found, generate a placeholder ID 
@@ -514,11 +528,23 @@ class ElevenlabsAPI:
             }
             
             # Create a new knowledge base list with our updated document
-            new_kb_list = [new_kb_entry]
+            new_kb_list = []
             
-            # Keep other non-TaurBull entries
+            # Add our updated document first
+            new_kb_list.append(new_kb_entry)
+            
+            # Keep other entries that don't match our document type or ID
             for kb in kb_list:
-                if kb.get("id") != document_id and not kb.get("name", "").startswith("TaurBull"):
+                kb_name = kb.get("name", "")
+                
+                # Only skip documents with the same ID or same document type
+                if kb.get("id") == document_id:
+                    continue
+                elif doc_type and "_" in kb_name and doc_type.lower() in kb_name.lower():
+                    logger.info(f"Replacing document with same type: {kb_name}")
+                    continue
+                else:
+                    # Keep all other documents
                     new_kb_list.append(kb)
             
             # Create the update data
@@ -539,7 +565,7 @@ class ElevenlabsAPI:
             }
             
             # Send the update
-            logger.info(f"Updating agent with new document content (ID: {document_id})")
+            logger.info(f"Updating agent with new document content (ID: {document_id}, Type: {doc_type or 'Unknown'})")
             update_endpoint = f"/convai/agents/{self.assistant_id}"
             response = self._make_request("PATCH", update_endpoint, update_data)
             
