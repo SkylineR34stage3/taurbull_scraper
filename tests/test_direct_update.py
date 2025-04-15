@@ -8,6 +8,7 @@ import os
 import logging
 import sys
 import time
+import pytest
 from datetime import datetime
 
 # Configure logging
@@ -25,6 +26,7 @@ except ImportError as e:
     logger.error(f"Python path: {sys.path}")
     raise
 
+@pytest.mark.skip(reason="Requires actual Elevenlabs API credentials")
 def test_direct_update():
     """Test directly updating the document content in a convai agent."""
     
@@ -72,34 +74,24 @@ def test_direct_update():
     )
     
     # Check the response
-    if "error" not in response:
-        document_id = response.get("id")
-        logger.info(f"✅ Update successful. Document ID: {document_id}")
-        logger.info(f"Update completed in {time.time() - start_time:.2f} seconds")
-        
-        # Try to get assistant info to verify the update
-        logger.info("Verifying update...")
-        assistant_info = api.get_assistant_info()
-        
-        if "error" not in assistant_info:
-            prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
-            kb_list = prompt.get("knowledge_base", [])
-            
-            if kb_list:
-                logger.info(f"Found {len(kb_list)} knowledge base entries:")
-                for i, kb in enumerate(kb_list, 1):
-                    logger.info(f"  {i}. {kb.get('name', 'Unknown')} (ID: {kb.get('id', 'Unknown')})")
-                
-                return True
-            else:
-                logger.error("No knowledge base entries found in prompt")
-        else:
-            logger.error(f"Failed to get assistant info: {assistant_info}")
-    else:
-        logger.error(f"❌ Update failed: {response}")
+    assert "error" not in response, f"Update failed: {response}"
+    document_id = response.get("id")
+    logger.info(f"✅ Update successful. Document ID: {document_id}")
+    logger.info(f"Update completed in {time.time() - start_time:.2f} seconds")
     
-    return False
+    # Try to get assistant info to verify the update
+    logger.info("Verifying update...")
+    assistant_info = api.get_assistant_info()
+    
+    assert "error" not in assistant_info, f"Failed to get assistant info: {assistant_info}"
+    prompt = assistant_info.get("conversation_config", {}).get("agent", {}).get("prompt", {})
+    kb_list = prompt.get("knowledge_base", [])
+    
+    assert kb_list, "No knowledge base entries found in prompt"
+    logger.info(f"Found {len(kb_list)} knowledge base entries:")
+    for i, kb in enumerate(kb_list, 1):
+        logger.info(f"  {i}. {kb.get('name', 'Unknown')} (ID: {kb.get('id', 'Unknown')})")
 
 if __name__ == "__main__":
-    success = test_direct_update()
-    sys.exit(0 if success else 1) 
+    test_direct_update()
+    sys.exit(0) 

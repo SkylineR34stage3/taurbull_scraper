@@ -1,10 +1,11 @@
 """
-Simple test script to upload a document to the knowledge base and associate it with an assistant.
+Test script to upload a document to the knowledge base and associate it with an assistant.
 """
 
 import os
 import sys
 import logging
+from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -17,8 +18,8 @@ sys.path.insert(0, parent_dir)
 try:
     from src.elevenlabs_api import ElevenlabsAPI
 except ImportError as e:
-    logger.error(f"Error importing ElevenlabsAPI: {e}")
-    logger.error(f"Python path: {sys.path}")
+    logging.error(f"Error importing ElevenlabsAPI: {e}")
+    logging.error(f"Python path: {sys.path}")
     raise
 
 def create_and_associate_test_document():

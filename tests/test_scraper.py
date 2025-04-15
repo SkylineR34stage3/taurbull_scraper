@@ -47,12 +47,9 @@ def test_scraper_basic():
     faq_url = f"{scraper.BASE_URL}{scraper.FAQ_PATH}"
     page = scraper._get_page(faq_url)
     
-    if page:
-        logger.info("Successfully fetched the FAQ page")
-        logger.info(f"Page title: {page.title.string if page.title else 'No title found'}")
-    else:
-        logger.error("Failed to fetch the FAQ page")
-        return False
+    assert page is not None, "Failed to fetch the FAQ page"
+    logger.info("Successfully fetched the FAQ page")
+    logger.info(f"Page title: {page.title.string if page.title else 'No title found'}")
     
     # Test extracting FAQ sections
     logger.info("Testing _extract_faq_sections method")
@@ -79,7 +76,7 @@ def test_scraper_basic():
     else:
         logger.info("No additional content found")
     
-    return True
+    assert faq_sections, "No FAQ sections were found"
 
 def test_full_scrape():
     """Test the full scraping process"""
@@ -93,29 +90,27 @@ def test_full_scrape():
     
     # Check the results
     faq_sections = scraped_data.get("faq", [])
-    if faq_sections:
-        total_questions = sum(len(section.get("questions", [])) for section in faq_sections)
-        logger.info(f"Successfully scraped {len(faq_sections)} FAQ sections with {total_questions} total questions")
-        
-        # Save the scraped data to a file for manual review
-        save_to_file(scraped_data, "scraped_data.json")
-        
-        # Test formatting the content for upload
-        logger.info("Testing format_content_for_upload method")
-        formatted_content, document_title = scraper.format_content_for_upload(scraped_data)
-        
-        logger.info(f"Formatted content length: {len(formatted_content)} characters")
-        logger.info(f"Document title: {document_title}")
-        
-        # Save the formatted content to a file for manual review
-        with open(os.path.join(os.path.dirname(__file__), "formatted_content.md"), 'w', encoding='utf-8') as f:
-            f.write(formatted_content)
-        logger.info("Formatted content saved to formatted_content.md")
-        
-        return True
-    else:
-        logger.error("No FAQ sections found during website scraping")
-        return False
+    assert faq_sections, "No FAQ sections found during website scraping"
+    
+    total_questions = sum(len(section.get("questions", [])) for section in faq_sections)
+    logger.info(f"Successfully scraped {len(faq_sections)} FAQ sections with {total_questions} total questions")
+    
+    # Save the scraped data to a file for manual review
+    save_to_file(scraped_data, "scraped_data.json")
+    
+    # Test formatting the content for upload
+    logger.info("Testing format_content_for_upload method")
+    formatted_content, document_title = scraper.format_content_for_upload(scraped_data)
+    
+    logger.info(f"Formatted content length: {len(formatted_content)} characters")
+    logger.info(f"Document title: {document_title}")
+    
+    # Save the formatted content to a file for manual review
+    with open(os.path.join(os.path.dirname(__file__), "formatted_content.md"), 'w', encoding='utf-8') as f:
+        f.write(formatted_content)
+    logger.info("Formatted content saved to formatted_content.md")
+    
+    assert formatted_content, "Failed to format content for upload"
 
 if __name__ == "__main__":
     logger.info("Starting TaurBull scraper tests")
